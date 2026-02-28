@@ -61,3 +61,17 @@ gatewayApi:
       namespace: ingress-apisix
   hostnames:
     - dev-apis.ampliorinternal.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: apisix.apache.org
+            kind: PluginConfig
+            name: api-frontend-only
+      backendRefs:
+        - name: hello-world-api-svc
+          port: 80
