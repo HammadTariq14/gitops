@@ -55,13 +55,6 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-      - ALL
-    add:
-      - CHOWN
-      - SETGID
-      - SETUID
   readOnlyRootFilesystem: false
   runAsNonRoot: false
   runAsUser: 0
