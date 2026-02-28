@@ -19,6 +19,8 @@ spec:
       namespace: dev
     - server: https://kubernetes.default.svc
       namespace: prod
+    - server: https://kubernetes.default.svc
+      namespace: argocd
 
   # Allow ArgoCD to create/manage Namespaces at cluster level
   clusterResourceWhitelist:
