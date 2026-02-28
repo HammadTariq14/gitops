@@ -48,6 +48,20 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+podSecurityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  fsGroup: 0
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: false
+  runAsUser: 0
+
 autoscaling:
   enabled: false
 
