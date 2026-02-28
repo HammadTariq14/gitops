@@ -1,1 +1,38 @@
-# placeholder — implement when RBAC scoping is needed
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: knor
+  namespace: argocd
+  # Prevent accidental deletion via ArgoCD UI
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Knor platform — all application deployments
+
+  # Only allow deployments sourced from this gitops repo
+  sourceRepos:
+    - https://github.com/HammadTariq14/gitops
+
+  # Only allow deploying to these namespaces in the in-cluster AKS
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: dev
+    - server: https://kubernetes.default.svc
+      namespace: prod
+
+  # Allow ArgoCD to create/manage Namespaces at cluster level
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # Allow all standard namespaced Kubernetes resources
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Restrict which roles and cluster roles can be bound
+  roles:
+    - name: read-only
+      description: Read-only access to all apps in this project
+      policies:
+        - p, proj:knor:read-only, applications, get, knor/*, allow

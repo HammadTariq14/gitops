@@ -1,1 +1,37 @@
-# placeholder — implement after Helm chart is ready
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-world-api-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: knor
+
+  source:
+    repoURL: https://github.com/HammadTariq14/gitops
+    targetRevision: main
+    path: charts/app
+    helm:
+      # Paths are relative to repo root (leading / = repo root)
+      valueFiles:
+        - /apps/hello-world-api/values.yaml
+        - /apps/hello-world-api/values-dev.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  syncPolicy:
+    automated:
+      prune: true      # remove resources deleted from git
+      selfHeal: true   # correct any manual cluster changes
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
