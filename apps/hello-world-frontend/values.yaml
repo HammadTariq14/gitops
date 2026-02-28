@@ -60,6 +60,16 @@ securityContext:
   runAsNonRoot: false
   runAsUser: 0
 
+volumes:
+  - name: frontend-config
+    configMap:
+      name: hello-world-frontend-config
+
+volumeMounts:
+  - name: frontend-config
+    mountPath: /usr/share/nginx/html/config.js
+    subPath: config.js
+
 autoscaling:
   enabled: false
 

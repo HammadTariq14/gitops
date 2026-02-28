@@ -3,3 +3,6 @@
 
 image:
   tag: latest   # updated by CI: do not edit manually
+
+config:
+  config.js: 'window.__APP_CONFIG__ = { API_URL: "https://dev-apis.ampliorinternal.com" };'
