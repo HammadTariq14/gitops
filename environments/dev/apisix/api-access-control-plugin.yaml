@@ -1,0 +1,53 @@
+apiVersion: apisix.apache.org/v1alpha1
+kind: PluginConfig
+metadata:
+  name: api-frontend-only
+  namespace: dev
+spec:
+  plugins:
+    - name: cors
+      config:
+        allow_origins: "https://dev-frontend.ampliorinternal.com"
+        allow_methods: "GET, POST, PUT, DELETE, OPTIONS"
+        allow_headers: "Content-Type, Authorization"
+        expose_headers: "*"
+        allow_credentials: true
+        max_age: 3600
+    - name: serverless-pre-function
+      config:
+        phase: access
+        functions:
+          - |
+            return function(conf, ctx)
+              local core = require("apisix.core")
+              local method = core.request.get_method()
+              
+              -- Skip access control for OPTIONS (handled by CORS plugin)
+              if method == 'OPTIONS' then
+                return
+              end
+              
+              -- Get headers - handle nil values safely
+              local referer = core.request.header(ctx, 'Referer')
+              local origin = core.request.header(ctx, 'Origin')
+              local allowed_origin = 'https://dev-frontend.ampliorinternal.com'
+              
+              -- Check if request is allowed
+              local is_allowed = false
+              
+              -- Allow if Referer contains frontend domain
+              if referer and string.find(referer, allowed_origin, 1, true) then
+                is_allowed = true
+              end
+              
+              -- Allow if Origin matches frontend exactly
+              if origin == allowed_origin then
+                is_allowed = true
+              end
+              
+              -- Deny if not allowed
+              if not is_allowed then
+                core.response.set_header('Content-Type', 'application/json')
+                core.response.exit(403, '{"error":"Access denied. API can only be accessed from the frontend application."}')
+              end
+            end
