@@ -1,0 +1,318 @@
+{{- include "service.validateValues" . -}}
+{{- if .Values.blueGreen.enabled }}
+{{- range $color, $config := .Values.blueGreen.colors }}
+{{- if $config.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "service.fullname" $ }}-deploy-{{ $color }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+    version: {{ $color }}
+  annotations:
+    deployment.kubernetes.io/revision: "{{ $.Values.image.tag }}"
+spec:
+  {{- if not $.Values.autoscaling.enabled }}
+  replicas: {{ $.Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ $.Values.revisionHistoryLimit | default 3 }}
+  progressDeadlineSeconds: 90
+  strategy:
+    {{- if eq $.Values.deploymentStrategy "RollingUpdate" }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ $.Values.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ $.Values.rollingUpdate.maxUnavailable }}
+    {{- else if eq $.Values.deploymentStrategy "Recreate" }}
+    type: Recreate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" $ | nindent 6 }}
+      version: {{ $color }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ toJson $.Values.config | sha256sum }}
+        checksum/secret: {{ toJson $.Values.secrets | sha256sum }}
+        {{- if $.Values.keyVault.enabled }}
+        checksum/keyvault: {{ toJson $.Values.keyVault.defaultSecrets | sha256sum }}
+        {{- end }}
+        {{- if $config.config }}
+        checksum/color-config: {{ toJson $config.config | sha256sum }}
+        {{- end }}
+        {{- if $config.secrets }}
+        checksum/color-secrets: {{ toJson $config.secrets | sha256sum }}
+        {{- end }}
+        {{- if $config.keyVaultSecrets }}
+        checksum/color-keyvault: {{ toJson $config.keyVaultSecrets | sha256sum }}
+        {{- end }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "service.selectorLabels" $ | nindent 8 }}
+        version: {{ $color }}
+        {{- with $.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "service.serviceAccountName" $ }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $.Chart.Name }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          image: "{{ $.Values.image.repository }}:{{ include "service.imageTagForColor" (dict "root" $ "color" $color "config" $config) }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $.Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "{{ $.Values.service.targetPort }}"
+            {{- range $key, $value := $.Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- if or $.Values.config (or $.Values.keyVault.enabled $.Values.secrets) }}
+          envFrom:
+            {{- if $.Values.config }}
+            - configMapRef:
+                name: {{ include "service.configMapNameForColor" (dict "root" $ "color" $color) }}
+            {{- end }}
+            {{- if or $.Values.keyVault.enabled $.Values.secrets }}
+            - secretRef:
+                name: {{ include "service.secretNameForColor" (dict "root" $ "color" $color) }}
+            {{- end }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ $.Values.healthCheck.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ $.Values.healthCheck.liveness.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.healthCheck.liveness.periodSeconds }}
+            timeoutSeconds: {{ $.Values.healthCheck.liveness.timeoutSeconds }}
+            failureThreshold: {{ $.Values.healthCheck.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ $.Values.healthCheck.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ $.Values.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: {{ $.Values.healthCheck.readiness.timeoutSeconds }}
+            failureThreshold: {{ $.Values.healthCheck.readiness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: {{ $.Values.healthCheck.startup.path }}
+              port: http
+            initialDelaySeconds: {{ $.Values.healthCheck.startup.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.healthCheck.startup.periodSeconds }}
+            timeoutSeconds: {{ $.Values.healthCheck.startup.timeoutSeconds }}
+            failureThreshold: {{ $.Values.healthCheck.startup.failureThreshold }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          {{- with $.Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $.Values.keyVault.enabled }}
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+          {{- end }}
+      {{- with $.Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $.Values.keyVault.enabled }}
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "service.secretProviderClassNameForColor" (dict "root" $ "color" $color) }}
+      {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $.Values.affinity }}
+      affinity:
+        {{- toYaml $.Values.affinity | nindent 8 }}
+      {{- else if and (eq $.Values.environment "production") $.Values.blueGreen.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - {{ include "service.name" $ }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+{{- end }}
+{{- end }}
+{{- else }}
+# Standard deployment for non-blue-green environments
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "service.fullname" . }}-deploy
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+  annotations:
+    deployment.kubernetes.io/revision: "{{ .Values.image.tag }}"
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit | default 3 }}
+  progressDeadlineSeconds: 180
+  strategy:
+    {{- if eq .Values.deploymentStrategy "RollingUpdate" }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+    {{- else if eq .Values.deploymentStrategy "Recreate" }}
+    type: Recreate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        checksum/secret: {{ toJson .Values.secrets | sha256sum }}
+        {{- if .Values.keyVault.enabled }}
+        checksum/keyvault: {{ toJson .Values.keyVault.defaultSecrets | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "service.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "service.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "{{ .Values.service.targetPort }}"
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- if or .Values.config (or .Values.keyVault.enabled .Values.secrets) }}
+          envFrom:
+            {{- if .Values.config }}
+            - configMapRef:
+                name: {{ include "service.fullname" . }}-config
+            {{- end }}
+            {{- if or .Values.keyVault.enabled .Values.secrets }}
+            - secretRef:
+                name: {{ include "service.fullname" . }}-secret
+            {{- end }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.readiness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.startup.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.startup.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.keyVault.enabled }}
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+          {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.keyVault.enabled }}
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "service.fullname" . }}-spc
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.affinity }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if and (eq .Values.environment "production") .Values.blueGreen.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: In
+                      values:
+                        - {{ include "service.name" . }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+{{- end }}

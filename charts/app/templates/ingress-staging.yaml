@@ -1,0 +1,47 @@
+{{- if and .Values.blueGreen.enabled .Values.ingress.test.enabled }}
+{{- if and (ne .Values.blueGreen.activeColor .Values.blueGreen.productionSlot) (ne .Values.blueGreen.productionSlot "none") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "service.fullname" . }}-ing-staging
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+    ingress-type: "test"
+    test-version: {{ .Values.blueGreen.activeColor }}
+  annotations:
+    {{- with .Values.ingress.test.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.test.className }}
+  ingressClassName: {{ .Values.ingress.test.className }}
+  {{- end }}
+  {{- if .Values.ingress.test.tls }}
+  tls:
+    {{- range .Values.ingress.test.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.test.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                # Point to the NEW version being deployed
+                name: {{ include "service.fullname" $ }}-svc-{{ $.Values.blueGreen.activeColor }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

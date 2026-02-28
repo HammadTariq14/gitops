@@ -1,0 +1,118 @@
+{{- if .Values.dbMigrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "service.fullname" . }}-db-migrate-{{ now | unixEpoch }}-{{ randAlphaNum 4 | lower }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "service.selectorLabels" . | nindent 8 }}
+        {{- if not .Values.dbMigrations.usePasswordAuth }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "service.serviceAccountName" . }}
+      restartPolicy: Never
+      containers:
+        - name: liquibase
+          image: "{{ .Values.dbMigrations.image.repository }}:{{ .Values.dbMigrations.image.tag }}"
+          imagePullPolicy: {{ .Values.dbMigrations.image.pullPolicy | default "IfNotPresent" }}
+          {{- if .Values.dbMigrations.usePasswordAuth }}
+          # Override to use dev entrypoint for password auth
+          command: ["/app/entrypoint-dev.sh"]
+          {{- end }}
+          env:
+            - name: DB_URL
+              value: "jdbc:postgresql://{{ .Values.config.DB_HOST }}:{{ .Values.config.DB_PORT }}/{{ .Values.config.DB_NAME }}?sslmode=require"
+            - name: DB_USERNAME
+              value: {{ .Values.config.DB_USERNAME | quote }}
+            {{- if .Values.dbMigrations.usePasswordAuth }}
+            # Password-based authentication (for dev/local)
+            - name: DB_PASSWORD
+              {{- if .Values.dbMigrations.password }}
+              # Direct password from values file (for local testing)
+              value: {{ .Values.dbMigrations.password | quote }}
+              {{- else }}
+              # Password from Kubernetes secret
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.blueGreen.enabled }}
+                  name: {{ include "service.secretNameForColor" (dict "root" . "color" .Values.blueGreen.productionSlot) }}
+                  {{- else }}
+                  name: {{ include "service.fullname" . }}-secret
+                  {{- end }}
+                  key: DB_PASSWORD
+              {{- end }}
+            {{- else }}
+            # Token-based authentication (for Azure Workload Identity)
+            - name: BCO_AZURE_SCOPE
+              value: {{ .Values.config.BCO_AZURE_SCOPE | default "https://ossrdbms-aad.database.windows.net/.default" | quote }}
+            {{- end }}
+            - name: MIGRATION_LOG_LEVEL
+              value: "info"
+            - name: MIGRATION_CONTEXTS
+              value: {{ .Values.liquibaseContexts | default "" | quote }}
+            - name: MIGRATION_LABELS
+              value: {{ .Values.liquibaseLabels | default "" | quote }}
+            - name: HELM_RELEASE_REVISION
+              value: {{ .Release.Revision | quote }}
+          args: ["update-and-tag"]
+          volumeMounts:
+            {{- if .Values.dbMigrations.usePasswordAuth }}
+            {{- if .Values.keyVault.enabled }}
+            # Mount KeyVault CSI to trigger secret creation
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+            {{- end }}
+            {{- else }}
+            # Mount Azure Workload Identity token
+            - mountPath: /var/run/secrets/azure/tokens
+              name: azure-identity-token
+              readOnly: true
+            {{- end }}
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        {{- if .Values.dbMigrations.usePasswordAuth }}
+        {{- if .Values.keyVault.enabled }}
+        # KeyVault CSI volume for password auth
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              {{- if .Values.blueGreen.enabled }}
+              # Use production slot SPC for blue-green deployments
+              secretProviderClass: {{ include "service.secretProviderClassNameForColor" (dict "root" . "color" .Values.blueGreen.productionSlot) }}
+              {{- else }}
+              # Use standard SPC for non-blue-green deployments
+              secretProviderClass: {{ include "service.fullname" . }}-spc
+              {{- end }}
+        {{- end }}
+        {{- else }}
+        # Azure Workload Identity token volume
+        - name: azure-identity-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: azure-identity-token
+        {{- end }}
+{{- end }} 

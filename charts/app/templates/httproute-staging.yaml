@@ -1,0 +1,67 @@
+{{- if and .Values.gatewayApi.enabled .Values.blueGreen.enabled .Values.gatewayApi.test.enabled }}
+{{- if and (ne .Values.blueGreen.activeColor .Values.blueGreen.productionSlot) (ne .Values.blueGreen.productionSlot "none") }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "service.fullname" . }}-route-staging
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+    route-type: "test"
+    test-version: {{ .Values.blueGreen.activeColor }}
+  {{- with .Values.gatewayApi.test.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.gatewayApi.test.parentRefs }}
+  parentRefs:
+    {{- range .Values.gatewayApi.test.parentRefs }}
+    - name: {{ .name }}
+      {{- if .namespace }}
+      namespace: {{ .namespace }}
+      {{- end }}
+      {{- if .sectionName }}
+      sectionName: {{ .sectionName }}
+      {{- end }}
+      {{- if .port }}
+      port: {{ .port }}
+      {{- end }}
+    {{- end }}
+  {{- else if .Values.gatewayApi.parentRefs }}
+  {{- /* Fall back to main parentRefs if test-specific ones not defined */}}
+  parentRefs:
+    {{- range .Values.gatewayApi.parentRefs }}
+    - name: {{ .name }}
+      {{- if .namespace }}
+      namespace: {{ .namespace }}
+      {{- end }}
+      {{- if .sectionName }}
+      sectionName: {{ .sectionName }}
+      {{- end }}
+      {{- if .port }}
+      port: {{ .port }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.gatewayApi.test.hostnames }}
+  hostnames:
+    {{- range .Values.gatewayApi.test.hostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- if .Values.gatewayApi.test.rules }}
+    {{- toYaml .Values.gatewayApi.test.rules | nindent 4 }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        # Point to the NEW version being deployed (activeColor)
+        - name: {{ include "service.fullname" . }}-svc-{{ .Values.blueGreen.activeColor }}
+          port: {{ .Values.service.port }}
+    {{- end }}
+{{- end }}
+{{- end }}

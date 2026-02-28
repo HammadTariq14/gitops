@@ -1,0 +1,54 @@
+{{/*
+HTTPRoute for Kubernetes Gateway API
+Creates an HTTPRoute resource that routes traffic to the service.
+- For blue-green deployments: routes to the active service (svc-active)
+- For standard deployments: routes to the standard service (svc)
+*/}}
+{{- if .Values.gatewayApi.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "service.fullname" . }}-route
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+    route-type: "production"
+  {{- with .Values.gatewayApi.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.gatewayApi.parentRefs }}
+  parentRefs:
+    {{- range .Values.gatewayApi.parentRefs }}
+    - name: {{ .name }}
+      {{- if .namespace }}
+      namespace: {{ .namespace }}
+      {{- end }}
+      {{- if .sectionName }}
+      sectionName: {{ .sectionName }}
+      {{- end }}
+      {{- if .port }}
+      port: {{ .port }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.gatewayApi.hostnames }}
+  hostnames:
+    {{- range .Values.gatewayApi.hostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- if .Values.gatewayApi.rules }}
+    {{- toYaml .Values.gatewayApi.rules | nindent 4 }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "service.activeServiceName" . }}
+          port: {{ .Values.service.port }}
+    {{- end }}
+{{- end }}

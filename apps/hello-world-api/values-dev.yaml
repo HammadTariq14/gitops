@@ -1,0 +1,5 @@
+# Dev environment overrides for hello-world-api
+# CI pipeline updates image.tag on every successful build.
+
+image:
+  tag: latest   # updated by CI: do not edit manually

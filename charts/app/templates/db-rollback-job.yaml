@@ -1,0 +1,136 @@
+{{/*
+  IMPORTANT: This job template is ALWAYS included and ALWAYS uses Liquibase.
+  
+  Why?
+  1. During --atomic rollback, Helm uses the PREVIOUS revision's templates AND values.
+  2. If the previous revision had dbMigrations.enabled=false, but the failing revision
+     applied DB changes, we STILL need to rollback those changes.
+  3. The Liquibase script already handles "nothing to rollback" gracefully.
+  
+  The rollback job will query the database for tags and only perform a rollback
+  if there are changes that need to be reverted.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "service.fullname" . }}-db-rollback-{{ now | unixEpoch }}-{{ randAlphaNum 4 | lower }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-rollback
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "service.selectorLabels" . | nindent 8 }}
+        {{- if and .Values.dbMigrations (not .Values.dbMigrations.usePasswordAuth) }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "service.serviceAccountName" . }}
+      restartPolicy: Never
+      containers:
+        # Always use Liquibase container - it will check if rollback is needed
+        - name: liquibase-rollback
+          {{- if and .Values.dbMigrations .Values.dbMigrations.image .Values.dbMigrations.image.repository }}
+          image: "{{ .Values.dbMigrations.image.repository }}:{{ .Values.dbMigrations.image.tag | default "latest" }}"
+          {{- else }}
+          # Fallback to default Liquibase image if not configured
+          image: "acrstablecoin.azurecr.io/bco-liquibase-wi:latest"
+          {{- end }}
+          imagePullPolicy: {{ if and .Values.dbMigrations .Values.dbMigrations.image }}{{ .Values.dbMigrations.image.pullPolicy | default "Always" }}{{ else }}Always{{ end }}
+          {{- if and .Values.dbMigrations .Values.dbMigrations.usePasswordAuth }}
+          # Override to use dev entrypoint for password auth
+          command: ["/app/entrypoint-dev.sh"]
+          {{- end }}
+          env:
+            - name: DB_URL
+              {{- if .Values.config }}
+              value: "jdbc:postgresql://{{ .Values.config.DB_HOST | default "localhost" }}:{{ .Values.config.DB_PORT | default "5432" }}/{{ .Values.config.DB_NAME | default "postgres" }}?sslmode=require"
+              {{- else }}
+              value: "jdbc:postgresql://localhost:5432/postgres?sslmode=require"
+              {{- end }}
+            - name: DB_USERNAME
+              {{- if .Values.config }}
+              value: {{ .Values.config.DB_USERNAME | default "postgres" | quote }}
+              {{- else }}
+              value: "postgres"
+              {{- end }}
+            {{- if and .Values.dbMigrations .Values.dbMigrations.usePasswordAuth }}
+            # Password-based authentication (for dev/local)
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if and .Values.blueGreen .Values.blueGreen.enabled }}
+                  name: {{ include "service.secretNameForColor" (dict "root" . "color" .Values.blueGreen.productionSlot) }}
+                  {{- else }}
+                  name: {{ include "service.fullname" . }}-secret
+                  {{- end }}
+                  key: DB_PASSWORD
+            {{- else }}
+            # Token-based authentication (for Azure Workload Identity)
+            - name: BCO_AZURE_SCOPE
+              {{- if .Values.config }}
+              value: {{ .Values.config.BCO_AZURE_SCOPE | default "https://ossrdbms-aad.database.windows.net/.default" | quote }}
+              {{- else }}
+              value: "https://ossrdbms-aad.database.windows.net/.default"
+              {{- end }}
+            {{- end }}
+            - name: MIGRATION_LOG_LEVEL
+              value: "info"
+            - name: HELM_RELEASE_REVISION
+              value: {{ .Release.Revision | quote }}
+          args: ["rollback-to-revision"]
+          volumeMounts:
+            {{- if and .Values.dbMigrations .Values.dbMigrations.usePasswordAuth }}
+            {{- if and .Values.keyVault .Values.keyVault.enabled }}
+            # Mount KeyVault CSI to trigger secret creation
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true
+            {{- end }}
+            {{- else }}
+            # Mount Azure Workload Identity token
+            - mountPath: /var/run/secrets/azure/tokens
+              name: azure-identity-token
+              readOnly: true
+            {{- end }}
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        {{- if and .Values.dbMigrations .Values.dbMigrations.usePasswordAuth }}
+        {{- if and .Values.keyVault .Values.keyVault.enabled }}
+        # KeyVault CSI volume for password auth
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              {{- if and .Values.blueGreen .Values.blueGreen.enabled }}
+              # Use production slot SPC for blue-green deployments
+              secretProviderClass: {{ include "service.secretProviderClassNameForColor" (dict "root" . "color" .Values.blueGreen.productionSlot) }}
+              {{- else }}
+              # Use standard SPC for non-blue-green deployments
+              secretProviderClass: {{ include "service.fullname" . }}-spc
+              {{- end }}
+        {{- end }}
+        {{- else }}
+        # Azure Workload Identity token volume
+        - name: azure-identity-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: azure-identity-token
+        {{- end }}

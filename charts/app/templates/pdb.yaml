@@ -1,0 +1,40 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- if not .Values.podDisruptionBudget.minAvailable }}
+{{- fail "Must specify minAvailable in podDisruptionBudget" }}
+{{- end }}
+{{- if .Values.blueGreen.enabled }}
+{{- range $color, $config := .Values.blueGreen.colors }}
+{{- if $config.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "service.fullname" $ }}-pdb-{{ $color }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+    version: {{ $color }}
+spec:
+  minAvailable: {{ $.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" $ | nindent 6 }}
+      version: {{ $color }}
+{{- end }}
+{{- end }}
+{{- else }}
+# Standard PDB for non-blue-green environments
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "service.fullname" . }}-pdb
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}

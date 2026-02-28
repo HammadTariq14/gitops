@@ -1,0 +1,51 @@
+{{- if or .Values.config (and .Values.blueGreen.enabled (or (index .Values.blueGreen.colors "blue").config (index .Values.blueGreen.colors "green").config)) }}
+{{- if .Values.blueGreen.enabled }}
+{{- range $color, $config := .Values.blueGreen.colors }}
+{{- if $config.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "service.configMapNameForColor" (dict "root" $ "color" $color) }}
+  namespace: {{ $.Values.namespace | default "default" }}
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+    version: {{ $color }}
+data:
+{{- $merged := dict }}
+{{- if $.Values.config }}
+{{- range $k, $v := $.Values.config }}
+  {{- if and $v (ne $v "null") (ne $v "") }}
+    {{- $_ := set $merged $k $v }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- if $config.config }}
+  {{- range $k, $v := $config.config }}
+    {{- if and $v (ne $v "null") (ne $v "") }}
+      {{- $_ := set $merged $k $v }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- range $k, $v := $merged }}
+  {{ $k }}: {{ $v | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+# Standard ConfigMap for non-blue-green environments
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "service.fullname" . }}-config
+  namespace: {{ .Values.namespace | default "default" }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.config }}
+  {{- if and $value (ne $value "null") (ne $value "") }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

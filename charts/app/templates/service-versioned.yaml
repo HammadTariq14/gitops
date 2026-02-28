@@ -1,0 +1,53 @@
+{{- if .Values.blueGreen.enabled }}
+{{- range $color, $config := .Values.blueGreen.colors }}
+{{- if $config.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "service.fullname" $ }}-svc-{{ $color }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "service.labels" $ | nindent 4 }}
+    version: {{ $color }}
+    service-type: versioned
+  {{- with $.Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $.Values.service.type }}
+  ports:
+    - port: {{ $.Values.service.port }}
+      targetPort: {{ $.Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "service.selectorLabels" $ | nindent 4 }}
+    version: {{ $color }}
+{{- end }}
+{{- end }}
+{{- else }}
+# Standard service for dev/staging (non-blue/green environments)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "service.fullname" . }}-svc
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+    service-type: standard
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "service.selectorLabels" . | nindent 4 }}
+{{- end }}

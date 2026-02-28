@@ -1,0 +1,7 @@
+# ArgoCD Helm install overrides
+# Used when installing/upgrading ArgoCD itself via:
+#   helm upgrade argocd argo/argo-cd -n argocd -f argocd/install/values.yaml
+
+configs:
+  params:
+    server.insecure: true   # AppGW handles TLS termination externally

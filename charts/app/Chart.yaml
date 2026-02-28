@@ -1,0 +1,13 @@
+apiVersion: v2
+name: app
+description: Generic Helm chart for standard HTTP services. Supports rolling update and blue/green deployments, APISIX Gateway API HTTPRoute, Azure Key Vault CSI, Workload Identity, HPA, PDB, and NetworkPolicy.
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - generic
+  - http
+  - azure
+  - apisix
+maintainers:
+  - name: HammadTariq14

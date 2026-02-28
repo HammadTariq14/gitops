@@ -1,0 +1,285 @@
+# values.yaml (Base/Default values)
+# This file contains default values that are common across all environments
+
+# Application configuration
+# Override app.name and app.component in each app's values.yaml
+app:
+  name: ""
+  component: "backend"
+  version: "1.0.0"
+
+# Global settings
+namespace: default
+environment: development
+partOf: backend-platform
+
+# Image configuration
+# Override image.repository and image.tag in each app's values.yaml
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# Deployment configuration
+replicaCount: 2
+deploymentStrategy: RollingUpdate
+revisionHistoryLimit: 2
+
+# Rolling update strategy (for dev/staging)
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+
+# Blue/Green configuration (for production)
+blueGreen:
+  enabled: false  # Set to true when using blue-green deployment
+  
+  # Colors configuration for looping
+  colors:
+    blue:
+      enabled: false  # Set to true to deploy blue
+      # imageTag: "v1.0"  # Optional: Override global image tag
+      # minReplicas: 2    # Optional: Override HPA minReplicas (when autoscaling enabled)
+      # maxReplicas: 5    # Optional: Override HPA maxReplicas (when autoscaling enabled)
+      # config:           # Optional: Color-specific config overrides/additions
+      #   LOG_LEVEL: "debug"
+      #   FEATURE_FLAG_A: "false"
+      # secrets:          # Optional: Color-specific secrets
+      #   API_KEY: "blue-api-key"
+      # keyVaultSecrets:  # Optional: Color-specific KeyVault secret names
+      #   TLS_CERT: "tls-cert-v1"
+      # resources:        # Optional: Color-specific resources
+      #   limits:
+      #     cpu: "500m"
+      #     memory: "512Mi"
+      
+    green:
+      enabled: false  # Set to true to deploy green
+      # imageTag: "v2.0"  # Optional: Override global image tag
+      # minReplicas: 3    # Optional: Override HPA minReplicas (when autoscaling enabled)
+      # maxReplicas: 8    # Optional: Override HPA maxReplicas (when autoscaling enabled)
+      # config:           # Optional: Color-specific config overrides/additions
+      #   LOG_LEVEL: "debug"
+      #   FEATURE_FLAG_A: "true"
+      #   NEW_FEATURE: "enabled"
+      # secrets:          # Optional: Color-specific secrets
+      #   API_KEY: "green-api-key"
+      # keyVaultSecrets:  # Optional: Color-specific KeyVault secret names
+      #   TLS_CERT: "tls-cert-v2"
+      # resources:        # Optional: Color-specific resources
+      #   limits:
+      #     cpu: "750m"
+      #     memory: "512Mi"
+  
+  # Which color receives production traffic
+  productionSlot: "blue"  # Which color the active service points to
+  
+  # Current deployment color (for staging ingress)
+  activeColor: "blue"     # Current deployment color (for staging ingress)
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+  annotations: {}
+
+# Health checks
+healthCheck:
+  liveness:
+    path: health
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startup:
+    path: health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Service Account
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+  # Azure Workload Identity configuration
+  workloadIdentity:
+    enabled: false
+    clientId: ""  # Azure AD Application Client ID
+    tenantId: ""  # Azure AD Tenant ID
+
+# Security Context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 2000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1001
+
+# Ingress — disabled: we use APISIX Gateway API HTTPRoute instead
+ingress:
+  enabled: false
+  className: "nginx"
+  test:
+    enabled: false
+    className: "nginx"
+    annotations: {}
+    hosts: []
+    tls: []
+
+# Gateway API (APISIX HTTPRoute)
+# Enable this in each app's values.yaml and set hostnames + parentRefs
+gatewayApi:
+  enabled: false
+  annotations: {}
+  parentRefs:
+    - name: apisix
+      namespace: ingress-apisix
+  hostnames: []
+  # Example:
+  # hostnames:
+  #   - dev-apis.ampliorinternal.com
+  rules: []
+  # Override rules only if you need path-based routing.
+  # Default: PathPrefix "/" forwarded to service.
+  test:
+    enabled: false   # staging HTTPRoute for blue/green
+    hostnames: []
+
+# Network Policy
+networkPolicy:
+  enabled: false
+  
+  # Ingress rules - who can connect TO your pods
+  ingress:
+    #Allow traffic from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+    
+   # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3000
+  # Egress rules - where your pods can connect TO
+  egress:
+    - {}  # Allow all egress traffic (default for easy start)
+
+
+# Environment variables
+env:
+  LOG_LEVEL: "info"
+  NODE_OPTIONS: "--max-old-space-size=512"
+
+
+# ConfigMap data
+config:
+#  DATABASE_HOST: "localhost"
+#  DATABASE_PORT: "5432"
+#  DATABASE_NAME: "backend_dev"
+
+
+# Secret data (base64 encoded values will be applied)
+secrets:
+#  DATABASE_PASSWORD: "your-db-password"
+
+
+# Pod configuration
+podAnnotations: {}
+podLabels: {}
+terminationGracePeriodSeconds: 30
+
+# Node scheduling
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Volumes
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+volumes:
+  - name: tmp
+    emptyDir: {}
+
+# Azure Key Vault Integration
+keyVault:
+  enabled: false
+  name: ""
+  tenantId: ""
+  clientId: ""  # Managed Identity Client ID
+  
+  # Refresh secrets from Key Vault (enables SPC hooks + cleanup)
+  refreshSecrets: false  # Set to true to force complete secret refresh
+  
+  # Default secret names in Key Vault
+  defaultSecrets:
+    # DATABASE_PASSWORD: "database-password"
+    # API_KEY: "api-key"
+    # TLS_CERT: "tls-cert"
+
+# Liquibase DB migrations
+# Controlled via pre-install/pre-upgrade and pre-rollback Jobs
+# Provide an image that contains Liquibase + a token fetcher (DefaultAzureCredential)
+# Example: acrstablecoin.azurecr.io/bco-liquibase-wi:latest
+# Migrations run once per release; set contexts/labels as needed
+#
+# Note: For rollback, Jobs will run rollbackToTag release-{{ .Release.Revision }}
+# Ensure your update step tags the DB on success with that tag format
+
+dbMigrations:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# Optional controls passed to Liquibase
+liquibaseContexts: ""
+liquibaseLabels: "" 
