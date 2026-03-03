@@ -21,6 +21,10 @@ spec:
       namespace: prod
     - server: https://kubernetes.default.svc
       namespace: argocd
+    - server: https://kubernetes.default.svc
+      namespace: conductor
+    - server: https://kubernetes.default.svc
+      namespace: ingress-apisix
 
   # Allow ArgoCD to create/manage Namespaces at cluster level
   clusterResourceWhitelist:
