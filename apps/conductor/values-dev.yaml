@@ -2,20 +2,24 @@
 # Conductor OSS - Dev Environment Overrides
 # =============================================================================
 # Connection strings for Azure PostgreSQL and Redis in dev environment.
-# ⚠️ Move passwords to Key Vault for production.
+# Sensitive values (Redis key, DB password) are pulled from Key Vault via CSI.
 # =============================================================================
 
 image:
   tag: "3.22.0-rc1"
 
-env:
-  # Redis host string — format: host:port:rack
-  # Azure Redis SSL port 6380, non-SSL disabled
-  # format: host:port:rack:password (password is 4th param for Azure Redis auth)
-  # ⚠️ Replace REDIS_ACCESS_KEY with your actual Redis primary key (not stored in git)
-  CONDUCTOR_REDIS_HOSTS: "ampliordev01-redis.redis.cache.windows.net:6380:us-east-1c:REDIS_ACCESS_KEY_PLACEHOLDER"
-
+# Non-sensitive env vars (safe to store in git)
 config:
   SPRING_DATASOURCE_URL: "jdbc:postgresql://ampliordev-pg.postgres.database.azure.com:5432/conductor?sslmode=require"
   SPRING_DATASOURCE_USERNAME: "conductorapp"
-  SPRING_DATASOURCE_PASSWORD: "Conductor@Dev123"
+
+# Azure Key Vault integration — secrets injected as env vars via CSI driver
+# KV secret names: conductor-redis-hosts, spring-datasource-password
+keyVault:
+  enabled: true
+  name: "amplior-dev-kv"
+  tenantId: "58774800-82eb-4017-8fe0-e631bc71d5d7"
+  clientId: "ae8841d4-2d4c-4e35-b876-d261c7b2f4f8"  # kubelet managed identity
+  defaultSecrets:
+    CONDUCTOR_REDIS_HOSTS: "conductor-redis-hosts"
+    SPRING_DATASOURCE_PASSWORD: "spring-datasource-password"
