@@ -1,0 +1,19 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: apisix-dashboard-route
+  namespace: ingress-apisix
+spec:
+  parentRefs:
+    - name: apisix
+      namespace: ingress-apisix
+  hostnames:
+    - dev-dashboard.ampliorinternal.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: apisix-admin
+          port: 9180

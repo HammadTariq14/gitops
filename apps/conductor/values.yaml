@@ -1,0 +1,156 @@
+# =============================================================================
+# Conductor OSS - Base Values
+# Uses the shared charts/app Helm chart
+# =============================================================================
+# Conductor is a workflow orchestration engine originally built at Netflix.
+# This deploys conductoross/conductor with PostgreSQL as the primary backend
+# for workflow metadata, queues, indexing and locking — no Elasticsearch needed.
+# Redis is used for caching and distributed locks.
+# =============================================================================
+
+app:
+  name: conductor
+  component: workflow-engine
+  version: "3.22.0"
+
+namespace: conductor
+environment: development
+partOf: platform
+
+image:
+  repository: conductoross/conductor
+  tag: "3.22.0-rc1"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+deploymentStrategy: Recreate
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# JVM app — needs generous startup time
+healthCheck:
+  liveness:
+    path: /health
+    initialDelaySeconds: 120
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 5
+  readiness:
+    path: /health
+    initialDelaySeconds: 90
+    periodSeconds: 15
+    timeoutSeconds: 10
+    failureThreshold: 5
+  startup:
+    path: /health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 60
+
+# POC-level specs — enough for light workflow testing
+resources:
+  requests:
+    cpu: "250m"
+    memory: "1Gi"
+  limits:
+    cpu: "500m"
+    memory: "2Gi"
+
+# Conductor image runs as root
+podSecurityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  fsGroup: 0
+
+securityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: []
+  readOnlyRootFilesystem: false
+
+autoscaling:
+  enabled: false
+
+blueGreen:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+ingress:
+  enabled: false
+
+# APISIX route for Conductor UI + API
+gatewayApi:
+  enabled: true
+  parentRefs:
+    - name: apisix
+      namespace: ingress-apisix
+  hostnames:
+    - dev-conductor.ampliorinternal.com
+
+networkPolicy:
+  enabled: false
+
+serviceAccount:
+  create: true
+  automount: true
+
+# Conductor env vars — Spring Boot property mapping
+# Format: dots → underscores, uppercase
+# e.g. conductor.db.type → CONDUCTOR_DB_TYPE
+env:
+  # JVM tuning for POC (cap heap at 1GB)
+  JAVA_OPTS: "-Xms512m -Xmx1024m -Dpolyglot.engine.WarnInterpreterOnly=false"
+  # Conductor core
+  CONDUCTOR_APP_OWNEREMAILMANDATORY: "false"
+  # PostgreSQL as primary backend (metadata, queues, indexing, locking)
+  CONDUCTOR_DB_TYPE: "postgres"
+  CONDUCTOR_QUEUE_TYPE: "postgres"
+  CONDUCTOR_INDEXING_ENABLED: "true"
+  CONDUCTOR_INDEXING_TYPE: "postgres"
+  CONDUCTOR_ELASTICSEARCH_VERSION: "0"
+  CONDUCTOR_APP_WORKFLOWEXECUTIONLOCKENABLED: "true"
+  CONDUCTOR_WORKFLOW__EXECUTION__LOCK_TYPE: "postgres"
+  # PostgreSQL performance tuning
+  CONDUCTOR_POSTGRES_POLLDATAFLUSHINTERVAL: "5000"
+  CONDUCTOR_POSTGRES_POLLDATACACHEVALIDITYPERIOD: "5000"
+  CONDUCTOR_POSTGRES_ONLYINDEXONSTATUSCHANGE: "true"
+  CONDUCTOR_POSTGRES_EXPERIMENTALQUEUENOTIFY: "true"
+  # Redis — used for caching
+  CONDUCTOR_REDIS_HOSTS: ""
+
+# PostgreSQL connection — populated per environment
+config:
+  SPRING_DATASOURCE_URL: ""
+  SPRING_DATASOURCE_USERNAME: ""
+  SPRING_DATASOURCE_PASSWORD: ""
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: logs
+    mountPath: /app/logs
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: logs
+    emptyDir: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+podLabels: {}
+terminationGracePeriodSeconds: 60
+
+keyVault:
+  enabled: false
